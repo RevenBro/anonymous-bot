@@ -4,7 +4,7 @@
   "description": "Anonymous messaging Telegram bot",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot-webhook.js",
+    "start": "node start.js",
     "dev": "node bot.js"
   },
   "dependencies": {
