@@ -48,14 +48,6 @@ if (mongoose.connection.readyState === 0) {
 
 const userStates = new Map();
 
-// Webhook setup
-const webhookPath = `/bot${TOKEN}`;
-if (process.env.NODE_ENV === 'production') {
-  bot.setWebHook(`${WEBHOOK_URL}${webhookPath}`)
-    .then(() => console.log('Webhook sozlandi'))
-    .catch('webhook xatosi ', console.error);
-}
-
 // Health check
 app.get('/', (req, res) => {
   res.json({ 
@@ -308,12 +300,18 @@ bot.onText(/\/stats/, async (msg) => {
 // Vercel serverless function
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log(`Server ${PORT} portda ishga tushdi`);
+});
+
+(async () => {
+  if (!process.env.WEBHOOK_URL) {
+    throw new Error('WEBHOOK_URL Render env’da yo‘q');
+  }
 
   await bot.setWebHook(`${process.env.WEBHOOK_URL}${webhookPath}`);
   console.log('Webhook o‘rnatildi');
-});
+})();
 
 
 module.exports = app;
