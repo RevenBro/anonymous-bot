@@ -8,11 +8,9 @@ const TOKEN = process.env.BOT_TOKEN;
 const BOT_USERNAME = process.env.BOT_USERNAME;
 const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://anonymous-bot-sand.vercel.app';
 
-// Express app
 const app = express();
 app.use(bodyParser.json());
 
-// Bot (webhook mode)
 const bot = new TelegramBot(TOKEN);
 
 // User Schema
@@ -48,7 +46,6 @@ if (mongoose.connection.readyState === 0) {
     .catch(err => console.error('❌ MongoDB xatosi:', err));
 }
 
-// User states
 const userStates = new Map();
 
 // Webhook setup
@@ -93,7 +90,6 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
       console.log(`➕ Yangi foydalanuvchi: ${userId}`);
     }
 
-    // Agar parametrsiz /start bo'lsa - o'z linkini yuborish
     if (!param) {
       const personalLink = `https://t.me/${BOT_USERNAME}?start=${userId}`;
       
@@ -109,20 +105,17 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
 
     const recipientId = parseInt(param);
 
-    // O'ziga xabar yubormoqchi bo'lsa
     if (recipientId === userId) {
       await bot.sendMessage(chatId, '❌ Siz o\'zingizga xabar yubora olmaysiz!');
       return;
     }
 
-    // Qabul qiluvchi mavjudligini tekshirish
     const recipient = await User.findOne({ telegramId: recipientId });
     if (!recipient) {
       await bot.sendMessage(chatId, '❌ Bunday foydalanuvchi topilmadi!');
       return;
     }
 
-    // Foydalanuvchi holatini saqlash
     userStates.set(userId, {
       action: 'sending_message',
       recipientId: recipientId
@@ -139,11 +132,12 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
   }
 });
 
-// Message handler
+// Bitta unified message handler
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
+  // Komandalarni o'tkazib yuborish
   if (msg.text && msg.text.startsWith('/')) {
     return;
   }
@@ -151,44 +145,72 @@ bot.on('message', async (msg) => {
   try {
     const userState = userStates.get(userId);
 
-    if (!userState || userState.action !== 'sending_message') {
+    if (!userState) {
       return;
     }
 
-    const recipientId = userState.recipientId;
-    let messageText = msg.text || '[Media fayl]';
+    // HOLATGA QARAB ISHLOV BERISH
+    
+    // 1. Anonim xabar yuborish
+    if (userState.action === 'sending_message') {
+      const recipientId = userState.recipientId;
+      let messageText = msg.text || '[Media fayl]';
 
-    // Xabarni bazaga saqlash
-    const message = new Message({
-      recipientId: recipientId,
-      senderId: userId,
-      content: messageText,
-      messageType: msg.text ? 'text' : 'media',
-      timestamp: new Date()
-    });
-    await message.save();
+      const message = new Message({
+        recipientId: recipientId,
+        senderId: userId,
+        content: messageText,
+        messageType: msg.text ? 'text' : 'media',
+        timestamp: new Date()
+      });
+      await message.save();
 
-    // Qabul qiluvchiga xabar yuborish (inline button bilan)
-    await bot.sendMessage(recipientId,
-      `🎭 Sizga anonim xabar keldi:\n\n` +
-      `"${messageText}"`,
-      {
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '💬 Javob berish', callback_data: `reply_${message._id}` }
-          ]]
+      // Qabul qiluvchiga xabar yuborish (inline button bilan)
+      await bot.sendMessage(recipientId,
+        `🎭 Sizga anonim xabar keldi:\n\n` +
+        `"${messageText}"`,
+        {
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '💬 Javob berish', callback_data: `reply_${message._id}` }
+            ]]
+          }
         }
+      );
+
+      await bot.sendMessage(chatId,
+        `✅ Xabaringiz muvaffaqiyatli yuborildi!\n\n` +
+        `🔒 Sizning shaxsingiz anonim qoldi.`
+      );
+
+      userStates.delete(userId);
+      console.log(`📨 Xabar yuborildi: ${userId} → ${recipientId}`);
+    }
+    
+    // 2. Javob berish
+    else if (userState.action === 'replying') {
+      const messageText = msg.text || '[Media fayl]';
+      
+      const originalMessage = await Message.findById(userState.originalMessageId);
+      
+      if (originalMessage) {
+        originalMessage.hasReplied = true;
+        await originalMessage.save();
       }
-    );
 
-    // Yuboruvchiga tasdiqlash
-    await bot.sendMessage(chatId,
-      `✅ Xabaringiz muvaffaqiyatli yuborildi!\n\n` +
-      `🔒 Sizning shaxsingiz anonim qoldi.`
-    );
+      await bot.sendMessage(userState.originalSenderId,
+        `💬 Sizning anonim xabaringizga javob:\n\n` +
+        `"${messageText}"`
+      );
 
-    userStates.delete(userId);
-    console.log(`📨 Xabar yuborildi: ${userId} → ${recipientId}`);
+      await bot.sendMessage(chatId,
+        `✅ Javobingiz yuborildi!\n\n` +
+        `🔒 Sizning shaxsingiz anonim qoldi.`
+      );
+
+      userStates.delete(userId);
+      console.log(`💬 Javob yuborildi: ${userId} → ${userState.originalSenderId}`);
+    }
 
   } catch (error) {
     console.error('Xato:', error);
@@ -196,18 +218,16 @@ bot.on('message', async (msg) => {
   }
 });
 
-// Callback query handler (inline button)
+// Callback query handler
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
   const userId = query.from.id;
   const data = query.data;
 
   try {
-    // "Javob berish" tugmasi bosilgan
     if (data.startsWith('reply_')) {
       const messageId = data.replace('reply_', '');
       
-      // Xabarni topish
       const message = await Message.findById(messageId);
 
       if (!message) {
@@ -218,7 +238,6 @@ bot.on('callback_query', async (query) => {
         return;
       }
 
-      // Allaqachon javob berilgan bo'lsa
       if (message.hasReplied) {
         await bot.answerCallbackQuery(query.id, {
           text: '❌ Siz bu xabarga allaqachon javob bergansiz!',
@@ -227,7 +246,6 @@ bot.on('callback_query', async (query) => {
         return;
       }
 
-      // Faqat qabul qiluvchi javob bera oladi
       if (userId !== message.recipientId) {
         await bot.answerCallbackQuery(query.id, {
           text: '❌ Bu xabar sizga emas!',
@@ -236,7 +254,6 @@ bot.on('callback_query', async (query) => {
         return;
       }
 
-      // Javob berish holatini saqlash
       userStates.set(userId, {
         action: 'replying',
         originalMessageId: messageId,
@@ -266,51 +283,6 @@ bot.on('callback_query', async (query) => {
       text: '❌ Xatolik yuz berdi!',
       show_alert: true
     });
-  }
-});
-
-// Reply message handler
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-
-  if (msg.text && msg.text.startsWith('/')) {
-    return;
-  }
-
-  try {
-    const userState = userStates.get(userId);
-
-    // Javob berish jarayoni
-    if (userState && userState.action === 'replying') {
-      const messageText = msg.text || '[Media fayl]';
-      
-      // Asl xabarni topish va yangilash
-      const originalMessage = await Message.findById(userState.originalMessageId);
-      
-      if (originalMessage) {
-        originalMessage.hasReplied = true;
-        await originalMessage.save();
-      }
-
-      // Javobni yuborish
-      await bot.sendMessage(userState.originalSenderId,
-        `💬 Sizning anonim xabaringizga javob:\n\n` +
-        `"${messageText}"`
-      );
-
-      // Tasdiq
-      await bot.sendMessage(chatId,
-        `✅ Javobingiz yuborildi!\n\n` +
-        `🔒 Sizning shaxsingiz anonim qoldi.`
-      );
-
-      userStates.delete(userId);
-      console.log(`💬 Javob yuborildi: ${userId} → ${userState.originalSenderId}`);
-    }
-
-  } catch (error) {
-    console.error('Xato:', error);
   }
 });
 
