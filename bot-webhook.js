@@ -11,7 +11,7 @@ const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://anonymous-bot-sand.verce
 const app = express();
 app.use(bodyParser.json());
 
-const bot = new TelegramBot(TOKEN);
+const bot = new TelegramBot(TOKEN, {polling: false});
 
 // User Schema
 const userSchema = new mongoose.Schema({
@@ -50,9 +50,11 @@ const userStates = new Map();
 
 // Webhook setup
 const webhookPath = `/bot${TOKEN}`;
-bot.setWebHook(`${WEBHOOK_URL}${webhookPath}`)
-  .then(() => console.log('✅ Webhook sozlandi'))
-  .catch(err => console.error('❌ Webhook xatosi:', err));
+if (process.env.NODE_ENV === 'production') {
+  bot.setWebHook(`${WEBHOOK_URL}${webhookPath}`)
+    .then(() => console.log('Webhook sozlandi'))
+    .catch('webhook xatosi ', console.error);
+}
 
 // Health check
 app.get('/', (req, res) => {
@@ -305,10 +307,13 @@ bot.onText(/\/stats/, async (msg) => {
 
 // Vercel serverless function
 const PORT = process.env.PORT || 3000;
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    console.log(`🚀 Webhook bot ${PORT} portda ishlamoqda`);
-  });
-}
+
+app.listen(PORT, async () => {
+  console.log(`Server ${PORT} portda ishga tushdi`);
+
+  await bot.setWebHook(`${process.env.WEBHOOK_URL}${webhookPath}`);
+  console.log('Webhook o‘rnatildi');
+});
+
 
 module.exports = app;

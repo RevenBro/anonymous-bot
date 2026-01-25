@@ -2,9 +2,9 @@
   "name": "telegram-anonymous-bot",
   "version": "1.0.0",
   "description": "Anonymous messaging Telegram bot",
-  "main": "bot.js",
+  "main": "bot-webhook.js",
   "scripts": {
-    "start": "node start.js",
+    "start": "node bot-webhook.js",
     "dev": "node bot.js"
   },
   "dependencies": {
