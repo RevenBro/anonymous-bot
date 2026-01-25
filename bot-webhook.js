@@ -6,7 +6,7 @@ require('dotenv').config();
 
 const TOKEN = process.env.BOT_TOKEN;
 const BOT_USERNAME = process.env.BOT_USERNAME;
-const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://anonymous-bot-sand.vercel.app/';
+const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://anonymous-bot-sand.vercel.app';
 
 // Express app
 const app = express();
