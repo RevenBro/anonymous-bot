@@ -29,10 +29,12 @@ const userSchema = new mongoose.Schema({
 // Message Schema
 const messageSchema = new mongoose.Schema({
   recipientId: { type: Number, required: true, index: true },
+  senderId: { type: Number, default: null },
   content: { type: String, required: true },
   messageType: { type: String, enum: ['text', 'media'], default: 'text' },
   isFlagged: { type: Boolean, default: false },
   isDeleted: { type: Boolean, default: false },
+  hasReplied: { type: Boolean, default: false },
   timestamp: { type: Date, default: Date.now, index: true }
 });
 
@@ -91,6 +93,7 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
       console.log(`➕ Yangi foydalanuvchi: ${userId}`);
     }
 
+    // Agar parametrsiz /start bo'lsa - o'z linkini yuborish
     if (!param) {
       const personalLink = `https://t.me/${BOT_USERNAME}?start=${userId}`;
       
@@ -106,17 +109,20 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
 
     const recipientId = parseInt(param);
 
+    // O'ziga xabar yubormoqchi bo'lsa
     if (recipientId === userId) {
       await bot.sendMessage(chatId, '❌ Siz o\'zingizga xabar yubora olmaysiz!');
       return;
     }
 
+    // Qabul qiluvchi mavjudligini tekshirish
     const recipient = await User.findOne({ telegramId: recipientId });
     if (!recipient) {
       await bot.sendMessage(chatId, '❌ Bunday foydalanuvchi topilmadi!');
       return;
     }
 
+    // Foydalanuvchi holatini saqlash
     userStates.set(userId, {
       action: 'sending_message',
       recipientId: recipientId
@@ -146,30 +152,36 @@ bot.on('message', async (msg) => {
     const userState = userStates.get(userId);
 
     if (!userState || userState.action !== 'sending_message') {
-      await bot.sendMessage(chatId,
-        `📌 Anonim xabar yuborish uchun:\n` +
-        `/start komandasi orqali linkingizni oling va uni baham ko'ring!`
-      );
       return;
     }
 
     const recipientId = userState.recipientId;
     let messageText = msg.text || '[Media fayl]';
 
+    // Xabarni bazaga saqlash
     const message = new Message({
       recipientId: recipientId,
+      senderId: userId,
       content: messageText,
       messageType: msg.text ? 'text' : 'media',
       timestamp: new Date()
     });
     await message.save();
 
+    // Qabul qiluvchiga xabar yuborish (inline button bilan)
     await bot.sendMessage(recipientId,
       `🎭 Sizga anonim xabar keldi:\n\n` +
-      `"${messageText}"\n\n` +
-      `💬 Javob berish uchun o'z linkinggizni ulashing!`
+      `"${messageText}"`,
+      {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '💬 Javob berish', callback_data: `reply_${message._id}` }
+          ]]
+        }
+      }
     );
 
+    // Yuboruvchiga tasdiqlash
     await bot.sendMessage(chatId,
       `✅ Xabaringiz muvaffaqiyatli yuborildi!\n\n` +
       `🔒 Sizning shaxsingiz anonim qoldi.`
@@ -181,6 +193,124 @@ bot.on('message', async (msg) => {
   } catch (error) {
     console.error('Xato:', error);
     await bot.sendMessage(chatId, '❌ Xabar yuborishda xatolik yuz berdi.');
+  }
+});
+
+// Callback query handler (inline button)
+bot.on('callback_query', async (query) => {
+  const chatId = query.message.chat.id;
+  const userId = query.from.id;
+  const data = query.data;
+
+  try {
+    // "Javob berish" tugmasi bosilgan
+    if (data.startsWith('reply_')) {
+      const messageId = data.replace('reply_', '');
+      
+      // Xabarni topish
+      const message = await Message.findById(messageId);
+
+      if (!message) {
+        await bot.answerCallbackQuery(query.id, {
+          text: '❌ Xabar topilmadi!',
+          show_alert: true
+        });
+        return;
+      }
+
+      // Allaqachon javob berilgan bo'lsa
+      if (message.hasReplied) {
+        await bot.answerCallbackQuery(query.id, {
+          text: '❌ Siz bu xabarga allaqachon javob bergansiz!',
+          show_alert: true
+        });
+        return;
+      }
+
+      // Faqat qabul qiluvchi javob bera oladi
+      if (userId !== message.recipientId) {
+        await bot.answerCallbackQuery(query.id, {
+          text: '❌ Bu xabar sizga emas!',
+          show_alert: true
+        });
+        return;
+      }
+
+      // Javob berish holatini saqlash
+      userStates.set(userId, {
+        action: 'replying',
+        originalMessageId: messageId,
+        originalSenderId: message.senderId
+      });
+
+      await bot.answerCallbackQuery(query.id);
+      
+      await bot.sendMessage(chatId,
+        `✍️ Javobingizni yozing:\n\n` +
+        `💡 Javobingiz anonim yuboriladi.`
+      );
+
+      // Buttonni o'chirish
+      await bot.editMessageReplyMarkup(
+        { inline_keyboard: [] },
+        {
+          chat_id: chatId,
+          message_id: query.message.message_id
+        }
+      );
+    }
+
+  } catch (error) {
+    console.error('Callback xatosi:', error);
+    await bot.answerCallbackQuery(query.id, {
+      text: '❌ Xatolik yuz berdi!',
+      show_alert: true
+    });
+  }
+});
+
+// Reply message handler
+bot.on('message', async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+
+  if (msg.text && msg.text.startsWith('/')) {
+    return;
+  }
+
+  try {
+    const userState = userStates.get(userId);
+
+    // Javob berish jarayoni
+    if (userState && userState.action === 'replying') {
+      const messageText = msg.text || '[Media fayl]';
+      
+      // Asl xabarni topish va yangilash
+      const originalMessage = await Message.findById(userState.originalMessageId);
+      
+      if (originalMessage) {
+        originalMessage.hasReplied = true;
+        await originalMessage.save();
+      }
+
+      // Javobni yuborish
+      await bot.sendMessage(userState.originalSenderId,
+        `💬 Sizning anonim xabaringizga javob:\n\n` +
+        `"${messageText}"`
+      );
+
+      // Tasdiq
+      await bot.sendMessage(chatId,
+        `✅ Javobingiz yuborildi!\n\n` +
+        `🔒 Sizning shaxsingiz anonim qoldi.`
+      );
+
+      userStates.delete(userId);
+      console.log(`💬 Javob yuborildi: ${userId} → ${userState.originalSenderId}`);
+    }
+
+  } catch (error) {
+    console.error('Xato:', error);
   }
 });
 
