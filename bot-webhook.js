@@ -12,7 +12,6 @@ const {
 } = require('./handlers/premiumHandler');
 
 // Bot ishga tushganda
-startPremiumChecker(bot);
 
 const app = express();
 app.use(bodyParser.json());
@@ -34,6 +33,7 @@ const bot = new TelegramBot(TOKEN, { polling: false });
 ======================= */
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ MongoDB ulandi'))
+  startPremiumChecker(bot)
   .catch(err => console.error('❌ MongoDB xatosi:', err));
 
 /* =======================
