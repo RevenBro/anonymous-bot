@@ -3,6 +3,16 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const TelegramBot = require('node-telegram-bot-api');
 const mongoose = require('mongoose');
+const { startPremiumChecker } = require('./jobs/premiumChecker');
+const {
+  handlePremium,
+  handlePremiumStars,
+  handleBuyPremium,
+  handleCancelPremium
+} = require('./handlers/premiumHandler');
+
+// Bot ishga tushganda
+startPremiumChecker(bot);
 
 const app = express();
 app.use(bodyParser.json());
@@ -151,7 +161,22 @@ bot.on('callback_query', async (q) => {
 
   bot.answerCallbackQuery(q.id);
   bot.sendMessage(q.message.chat.id, '✍️ Javobingizni yozing');
+
+  const data = query.data;
+
+  if (data === 'premium_stars') {
+    await handlePremiumStars(bot, query);
+  }
+  else if (data.startsWith('buy_premium_')) {
+    const duration = data.replace('buy_premium_', '');
+    await handleBuyPremium(bot, query, duration);
+  }
+  else if (data === 'cancel_premium') {
+    await handleCancelPremium(bot, query);
+  }
 });
+
+bot.onText(/\/premium/, (msg) => handlePremium(bot, msg));
 
 /* =======================
    Server + webhook
