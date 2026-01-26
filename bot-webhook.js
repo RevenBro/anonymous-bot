@@ -11,8 +11,6 @@ const {
   handleCancelPremium
 } = require('./handlers/premiumHandler');
 
-// Bot ishga tushganda
-
 const app = express();
 app.use(bodyParser.json());
 
@@ -32,8 +30,10 @@ const bot = new TelegramBot(TOKEN, { polling: false });
    MongoDB
 ======================= */
 mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('✅ MongoDB ulandi'))
-  startPremiumChecker(bot)
+  .then(() => {
+    console.log('✅ MongoDB ulandi');
+    startPremiumChecker(bot);
+  })
   .catch(err => console.error('❌ MongoDB xatosi:', err));
 
 /* =======================
