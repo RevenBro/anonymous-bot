@@ -1,4 +1,6 @@
 // handlers/premiumHandler.js
+
+// /premium komandasi
 async function handlePremium(bot, msg, User) {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -11,17 +13,19 @@ async function handlePremium(bot, msg, User) {
       return;
     }
 
-    const expired = user.checkPremiumExpiry();
+    // Premium muddatini tekshirish
+    const expired = user.checkPremiumExpiry ? user.checkPremiumExpiry() : false;
     if (expired) {
       await user.save();
     }
 
+    // Agar premium bo'lsa
     if (user.isPremium) {
-      const daysLeft = Math.ceil((user.premiumUntil - new Date()) / (1000 * 60 * 60 * 24));
+      const daysLeft = Math.ceil((new Date(user.premiumUntil) - new Date()) / (1000 * 60 * 60 * 24));
       
       await bot.sendMessage(chatId,
         `🌟 Siz Premium foydalanuvchisiz!\n\n` +
-        `📅 Muddat: ${user.premiumUntil.toLocaleDateString('uz-UZ')}\n` +
+        `📅 Muddat: ${new Date(user.premiumUntil).toLocaleDateString('uz-UZ')}\n` +
         `⏰ Qolgan kunlar: ${daysLeft} kun\n\n` +
         `💎 Premium imkoniyatlaringiz:\n` +
         `✅ Cheksiz xabar yuborish\n` +
@@ -32,6 +36,7 @@ async function handlePremium(bot, msg, User) {
       return;
     }
 
+    // Premium sotib olish
     await bot.sendMessage(chatId,
       `🌟 Anonim+ Xizmatidan Foydalaning! 🌟\n\n` +
       `Sizni Anonim+ xizmatidan foydalanishga taklif etamiz, bu sizga qulayliklar va afzalliklar taqdim etadi:\n\n` +
@@ -57,10 +62,53 @@ async function handlePremium(bot, msg, User) {
 
   } catch (error) {
     console.error('Premium xatosi:', error);
-    await bot.sendMessage(chatId, '❌ Xatolik yuz berdi.');
+    await bot.sendMessage(chatId, '❌ Xatolik yuz berdi. Iltimos qayta urinib ko\'ring.');
   }
 }
 
+// Telegram Stars callback
+async function handlePremiumStars(bot, query) {
+  const chatId = query.message.chat.id;
+  const userId = query.from.id;
+
+  try {
+    await bot.editMessageText(
+      `⭐ *Tarfni tanlang:*\n\n` +
+      `Yangi funksiyalar va botning takomillashtirilgan ishlashi bizning Anonim+ tarifimizda mavjud.`,
+      {
+        chat_id: chatId,
+        message_id: query.message.message_id,
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '10 ⭐ 1 kunlik', callback_data: 'buy_premium_1day' },
+              { text: '25 ⭐ 3 kunlik', callback_data: 'buy_premium_3day' }
+            ],
+            [
+              { text: '75 ⭐ 1 haftalik', callback_data: 'buy_premium_1week' },
+              { text: '100 ⭐ 1 oylik', callback_data: 'buy_premium_1month' }
+            ],
+            [
+              { text: '250 ⭐ 3 oylik', callback_data: 'buy_premium_3month' },
+              { text: '1000 ⭐ cheksiz', callback_data: 'buy_premium_unlimited' }
+            ],
+            [
+              { text: '🚫 Bekor qilish', callback_data: 'cancel_premium' }
+            ]
+          ]
+        }
+      }
+    );
+
+    await bot.answerCallbackQuery(query.id);
+
+  } catch (error) {
+    console.error('Stars callback xatosi:', error);
+  }
+}
+
+// Premium sotib olish
 async function handleBuyPremium(bot, query, duration, User) {
   const chatId = query.message.chat.id;
   const userId = query.from.id;
@@ -76,6 +124,7 @@ async function handleBuyPremium(bot, query, duration, User) {
       return;
     }
 
+    // Premium muddat hisoblash
     let premiumDays = 0;
     let premiumType = '';
     let packageName = '';
@@ -107,12 +156,13 @@ async function handleBuyPremium(bot, query, duration, User) {
         packageName = '3 oylik';
         break;
       case 'unlimited':
-        premiumDays = 36500;
+        premiumDays = 36500; // 100 yil
         premiumType = 'unlimited';
         packageName = 'cheksiz';
         break;
     }
 
+    // Premium berish
     const premiumUntil = new Date();
     premiumUntil.setDate(premiumUntil.getDate() + premiumDays);
 
@@ -121,6 +171,7 @@ async function handleBuyPremium(bot, query, duration, User) {
     user.premiumType = premiumType;
     await user.save();
 
+    // Tabrik xabari
     await bot.editMessageText(
       `🎉 *Tabriklaymiz!* 🎉\n\n` +
       `Sizga *${packageName}* Premium taqdim etildi!\n\n` +
@@ -139,6 +190,7 @@ async function handleBuyPremium(bot, query, duration, User) {
     );
 
     await bot.answerCallbackQuery(query.id);
+
     console.log(`💎 Premium berildi: User ${userId} - ${packageName}`);
 
   } catch (error) {
@@ -147,6 +199,26 @@ async function handleBuyPremium(bot, query, duration, User) {
       text: '❌ Xatolik yuz berdi!',
       show_alert: true
     });
+  }
+}
+
+// Bekor qilish
+async function handleCancelPremium(bot, query) {
+  const chatId = query.message.chat.id;
+  
+  try {
+    await bot.editMessageText(
+      `❌ Bekor qilindi.\n\n` +
+      `Agar keyinroq Premium xizmatidan foydalanmoqchi bo'lsangiz, /premium buyrug'ini yuboring.`,
+      {
+        chat_id: chatId,
+        message_id: query.message.message_id
+      }
+    );
+
+    await bot.answerCallbackQuery(query.id);
+  } catch (error) {
+    console.error('Cancel xatosi:', error);
   }
 }
 
