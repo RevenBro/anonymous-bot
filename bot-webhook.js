@@ -174,7 +174,7 @@ bot.onText(/\/stats/, async (msg) => {
   }
 });
 
-// BITTA UNIFIED MESSAGE HANDLER
+// UNIFIED MESSAGE HANDLER
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -190,7 +190,6 @@ bot.on('message', async (msg) => {
       return;
     }
 
-    // Anonim xabar yuborish
     if (userState.action === 'sending_message') {
       const recipientId = userState.recipientId;
       let messageText = msg.text || '[Media fayl]';
@@ -224,8 +223,6 @@ bot.on('message', async (msg) => {
       userStates.delete(userId);
       console.log(`📨 Xabar yuborildi: ${userId} → ${recipientId}`);
     }
-    
-    // Javob berish
     else if (userState.action === 'replying') {
       const messageText = msg.text || '[Media fayl]';
       
@@ -256,13 +253,13 @@ bot.on('message', async (msg) => {
   }
 });
 
-// BITTA UNIFIED CALLBACK HANDLER
+// UNIFIED CALLBACK HANDLER
 bot.on('callback_query', async (query) => {
   const data = query.data;
   const chatId = query.message.chat.id;
   const userId = query.from.id;
 
-  console.log('🔔 Callback query:', data); // Debug
+  console.log('🔔 Callback query:', data);
 
   try {
     // Premium callbacks
@@ -331,8 +328,6 @@ bot.on('callback_query', async (query) => {
         }
       );
     }
-    
-    // Noma'lum callback
     else {
       console.log('⚠️ Noma\'lum callback:', data);
       await bot.answerCallbackQuery(query.id);
@@ -354,4 +349,5 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-module.exports = app;
+// Bot instance'ni export qilish (backend uchun)
+module.exports = { app, bot };
