@@ -9,6 +9,11 @@ const {
   handleBuyPremium,
   handleCancelPremium
 } = require('./handlers/premiumHandler');
+const {
+  handleMediaSend,
+  getMediaType,
+  canSendMedia
+} = require('./handlers/mediaHandler');
 require('dotenv').config();
 
 const TOKEN = process.env.BOT_TOKEN;
@@ -45,15 +50,38 @@ userSchema.methods.checkPremiumExpiry = function() {
   return false;
 };
 
-// Message Schema
+// Message Schema - Media support bilan
 const messageSchema = new mongoose.Schema({
   recipientId: { type: Number, required: true, index: true },
   senderId: { type: Number, default: null },
   content: { type: String, required: true },
   messageType: { type: String, enum: ['text', 'media'], default: 'text' },
+  
+  // Media uchun qo'shimcha maydonlar
+  mediaType: {
+    type: String,
+    enum: ['photo', 'audio', 'animation', 'document', null],
+    default: null
+  },
+  fileId: {
+    type: String,
+    default: null,
+    index: true
+  },
+  fileName: {
+    type: String,
+    default: null
+  },
+  fileSize: {
+    type: Number,
+    default: 0
+  },
+  
+  // Moderatsiya
   isFlagged: { type: Boolean, default: false },
-  isDeleted: { type: Boolean, default: false },
+  isDeleted: { type: Boolean, default: false, index: true },
   hasReplied: { type: Boolean, default: false },
+  
   timestamp: { type: Date, default: Date.now, index: true }
 });
 
@@ -120,7 +148,10 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
         `🔗 Sizning anonim xabar qabul qilish linkinggiz:\n\n` +
         `${personalLink}\n\n` +
         `Bu linkni do'stlaringiz bilan baham ko'ring. ` +
-        `Ular sizga anonim xabar yuborishlari mumkin! 🎭`
+        `Ular sizga anonim xabar yuborishlari mumkin! 🎭\n\n` +
+        `📌 *Xususiyatlar:*\n` +
+        `• 📝 Matn xabar (hammaga)\n` +
+        `• 🖼️ Rasm, 🎵 Audio, 🎬 GIF (faqat PREMIUM)`
       );
       return;
     }
@@ -145,7 +176,8 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
 
     await bot.sendMessage(chatId,
       `✍️ Anonim xabaringizni yozing:\n\n` +
-      `💡 Xabaringiz qabul qiluvchiga anonim holda yuboriladi.`
+      `💡 Matn, rasm, audio yoki GIF yuborishingiz mumkin.\n` +
+      `(Rasm/Audio/GIF faqat PREMIUM obunachilar uchun)`
     );
 
   } catch (error) {
@@ -163,10 +195,12 @@ bot.onText(/\/stats/, async (msg) => {
   try {
     const totalUsers = await User.countDocuments();
     const totalMessages = await Message.countDocuments();
+    const premiumUsers = await User.countDocuments({ isPremium: true });
     
     await bot.sendMessage(chatId,
       `📊 Statistika:\n\n` +
       `👥 Foydalanuvchilar: ${totalUsers}\n` +
+      `💎 Premium: ${premiumUsers}\n` +
       `📨 Xabarlar: ${totalMessages}`
     );
   } catch (error) {
@@ -174,11 +208,12 @@ bot.onText(/\/stats/, async (msg) => {
   }
 });
 
-// UNIFIED MESSAGE HANDLER
+// ==================== UNIFIED MESSAGE HANDLER ====================
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
+  // Komanda bo'lsa skip
   if (msg.text && msg.text.startsWith('/')) {
     return;
   }
@@ -192,59 +227,74 @@ bot.on('message', async (msg) => {
 
     if (userState.action === 'sending_message') {
       const recipientId = userState.recipientId;
-      let messageText = msg.text || '[Media fayl]';
 
-      const message = new Message({
-        recipientId: recipientId,
-        senderId: userId,
-        content: messageText,
-        messageType: msg.text ? 'text' : 'media',
-        timestamp: new Date()
-      });
-      await message.save();
-
-      await bot.sendMessage(recipientId,
-        `🎭 Sizga anonim xabar keldi:\n\n` +
-        `"${messageText}"`,
-        {
-          reply_markup: {
-            inline_keyboard: [[
-              { text: '💬 Javob berish', callback_data: `reply_${message._id}` }
-            ]]
-          }
-        }
-      );
-
-      await bot.sendMessage(chatId,
-        `✅ Xabaringiz muvaffaqiyatli yuborildi!\n\n` +
-        `🔒 Sizning shaxsingiz anonim qoldi.`
-      );
-
-      userStates.delete(userId);
-      console.log(`📨 Xabar yuborildi: ${userId} → ${recipientId}`);
-    }
-    else if (userState.action === 'replying') {
-      const messageText = msg.text || '[Media fayl]';
-      
-      const originalMessage = await Message.findById(userState.originalMessageId);
-      
-      if (originalMessage) {
-        originalMessage.hasReplied = true;
-        await originalMessage.save();
+      // ========== MEDIA HANDLING ==========
+      if (msg.photo || msg.audio || msg.animation || msg.document) {
+        // Media yuborish
+        await handleMediaSend(bot, msg, User, Message, recipientId);
+        userStates.delete(userId);
+        return;
       }
 
-      await bot.sendMessage(userState.originalSenderId,
-        `💬 Sizning anonim xabaringizga javob:\n\n` +
-        `"${messageText}"`
-      );
+      // ========== TEXT HANDLING ==========
+      if (msg.text) {
+        const messageText = msg.text;
 
-      await bot.sendMessage(chatId,
-        `✅ Javobingiz yuborildi!\n\n` +
-        `🔒 Sizning shaxsingiz anonim qoldi.`
-      );
+        const message = new Message({
+          recipientId: recipientId,
+          senderId: userId,
+          content: messageText,
+          messageType: 'text',
+          timestamp: new Date()
+        });
+        await message.save();
 
-      userStates.delete(userId);
-      console.log(`💬 Javob yuborildi: ${userId} → ${userState.originalSenderId}`);
+        await bot.sendMessage(recipientId,
+          `🎭 Sizga anonim xabar keldi:\n\n` +
+          `"${messageText}"`,
+          {
+            reply_markup: {
+              inline_keyboard: [[
+                { text: '💬 Javob berish', callback_data: `reply_${message._id}` }
+              ]]
+            }
+          }
+        );
+
+        await bot.sendMessage(chatId,
+          `✅ Xabaringiz muvaffaqiyatli yuborildi!\n\n` +
+          `🔒 Sizning shaxsingiz anonim qoldi.`
+        );
+
+        userStates.delete(userId);
+        console.log(`📨 Matn xabar yuborildi: ${userId} → ${recipientId}`);
+      }
+    }
+    else if (userState.action === 'replying') {
+      // ========== REPLY TEXT ==========
+      if (msg.text) {
+        const messageText = msg.text;
+        
+        const originalMessage = await Message.findById(userState.originalMessageId);
+        
+        if (originalMessage) {
+          originalMessage.hasReplied = true;
+          await originalMessage.save();
+        }
+
+        await bot.sendMessage(userState.originalSenderId,
+          `💬 Sizning anonim xabaringizga javob:\n\n` +
+          `"${messageText}"`
+        );
+
+        await bot.sendMessage(chatId,
+          `✅ Javobingiz yuborildi!\n\n` +
+          `🔒 Sizning shaxsingiz anonim qoldi.`
+        );
+
+        userStates.delete(userId);
+        console.log(`💬 Javob yuborildi: ${userId} → ${userState.originalSenderId}`);
+      }
     }
 
   } catch (error) {
@@ -253,7 +303,7 @@ bot.on('message', async (msg) => {
   }
 });
 
-// UNIFIED CALLBACK HANDLER
+// ==================== UNIFIED CALLBACK HANDLER ====================
 bot.on('callback_query', async (query) => {
   const data = query.data;
   const chatId = query.message.chat.id;
@@ -349,5 +399,5 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-// Bot instance'ni export qilish (backend uchun)
+// Bot instance'ni export qilish
 module.exports = { app, bot };
