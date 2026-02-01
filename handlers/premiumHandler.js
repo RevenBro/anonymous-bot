@@ -1,121 +1,96 @@
-// handlers/premiumHandler.js
+// bot/handlers/premiumHandler.js
+const User = require('../models/User');
+const TelegramBot = require('node-telegram-bot-api');
 
-// /premium komandasi
-async function handlePremium(bot, msg, User) {
+/**
+ * /premium komandasi - Premium xususiyatlari haqida
+ */
+const handlePremium = async (bot, msg, User) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
   try {
-    let user = await User.findOne({ telegramId: userId });
-    
+    const user = await User.findOne({ telegramId: userId });
+
     if (!user) {
-      await bot.sendMessage(chatId, '❌ Avval /start ni bosing!');
+      await bot.sendMessage(chatId, '❌ Foydalanuvchi topilmadi!');
       return;
     }
 
-    // Premium muddatini tekshirish
-    const expired = user.checkPremiumExpiry ? user.checkPremiumExpiry() : false;
-    if (expired) {
-      await user.save();
-    }
+    // Premium tekshirish
+    user.checkPremiumExpiry();
 
-    // Agar premium bo'lsa
     if (user.isPremium) {
-      const daysLeft = Math.ceil((new Date(user.premiumUntil) - new Date()) / (1000 * 60 * 60 * 24));
+      const daysLeft = Math.ceil((user.premiumUntil - new Date()) / (1000 * 60 * 60 * 24));
       
       await bot.sendMessage(chatId,
-        `🌟 Siz Premium foydalanuvchisiz!\n\n` +
-        `📅 Muddat: ${new Date(user.premiumUntil).toLocaleDateString('uz-UZ')}\n` +
-        `⏰ Qolgan kunlar: ${daysLeft} kun\n\n` +
-        `💎 Premium imkoniyatlaringiz:\n` +
-        `✅ Cheksiz xabar yuborish\n` +
-        `✅ Reklama yo'q\n` +
-        `✅ Maxfiylik darajasi yuqori\n` +
-        `✅ 24/7 yordam`
+        `💎 PREMIUM OBUNASI MAVJUD\n\n` +
+        `✅ Holati: AKTIV\n` +
+        `⏰ Qolgan vaqt: ${daysLeft} kun\n` +
+        `📅 Tugadi: ${user.premiumUntil.toLocaleDateString('uz-UZ')}\n` +
+        `💝 Turi: ${user.premiumType}\n\n` +
+        `🎁 Xususiyatlar:\n` +
+        `• 🖼️ Rasm yuborish\n` +
+        `• 🎵 Audio yuborish\n` +
+        `• 🎬 GIF yuborish`
       );
       return;
     }
 
-    // Premium sotib olish
-    await bot.sendMessage(chatId,
-      `🌟 Anonim+ Xizmatidan Foydalaning! 🌟\n\n` +
-      `Sizni Anonim+ xizmatidan foydalanishga taklif etamiz, bu sizga qulayliklar va afzalliklar taqdim etadi:\n\n` +
-      `- *Reklamasiz:* Anonim+ foydalanuvchilarga hech qanday reklama yuborilmaydi, faqat siz uchun eng yaxshi tajriba!\n` +
-      `- *Shaxsiy Login:* Maxfiylikni ta'minlash uchun shaxsiy login xizmatidan foydalaning.\n` +
-      `- *Anonim Xabarlarni Ko'rish:* Sizga yuborilgan anonim xabarlarni hech qanday cheklovlarsiz ko'ring.\n` +
-      `- *Xabar Yo'lovchilarni Taqiqlash:* Xabar yo'lovchilarini taqiqlash imkoniyati orqali nazoratni oling.\n\n` +
-      `💎 *Anonim+ Narxlari:* Obuna narxlari va tafsilotlar uchun [shu yerga qarang](https://telegra.ph/Anonim-suxbatdosh-Premium-narxlari-01-26).`,
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '⭐ Telegram Stars', callback_data: 'premium_stars' }
-            ],
-            [
-              { text: '🏢 ADMIN ORQALI', url: 'https://t.me/Saidakbarovv_A' }
-            ]
-          ]
-        }
+    // Premium yo'q - narxlarni ko'rsatish
+    const premiumPrices = {
+      daily: { price: 5000, days: 1 },
+      weekly: { price: 25000, days: 7 },
+      monthly: { price: 80000, days: 30 },
+      unlimited: { price: 200000, days: 365 }
+    };
+
+    let priceText = `💎 PREMIUM OBUNASI\n\n` +
+                   `Ruxsat etilgan xususiyatlar:\n` +
+                   `• 🖼️ Rasm yuborish\n` +
+                   `• 🎵 Audio yuborish\n` +
+                   `• 🎬 GIF yuborish\n\n` +
+                   `📊 Tariflar:\n`;
+
+    const keyboard = [];
+
+    for (const [type, data] of Object.entries(premiumPrices)) {
+      const displayType = type.charAt(0).toUpperCase() + type.slice(1);
+      priceText += `• ${displayType}: ${data.price} so'm (${data.days} kun)\n`;
+      
+      keyboard.push([{
+        text: `${displayType} - ${data.price} so'm`,
+        callback_data: `buy_premium_${type}`
+      }]);
+    }
+
+    keyboard.push([{
+      text: '❌ Bekor qilish',
+      callback_data: 'cancel_premium'
+    }]);
+
+    await bot.sendMessage(chatId, priceText, {
+      reply_markup: {
+        inline_keyboard: keyboard
       }
-    );
+    });
 
   } catch (error) {
-    console.error('Premium xatosi:', error);
-    await bot.sendMessage(chatId, '❌ Xatolik yuz berdi. Iltimos qayta urinib ko\'ring.');
+    console.error('Premium handler error:', error);
+    await bot.sendMessage(chatId, '❌ Xatolik yuz berdi!');
   }
-}
+};
 
-// Telegram Stars callback
-async function handlePremiumStars(bot, query) {
+/**
+ * Premium sotib olishni bosish
+ */
+const handleBuyPremium = async (bot, query, duration, User) => {
   const chatId = query.message.chat.id;
   const userId = query.from.id;
 
   try {
-    await bot.editMessageText(
-      `⭐ *Tarfni tanlang:*\n\n` +
-      `Yangi funksiyalar va botning takomillashtirilgan ishlashi bizning Anonim+ tarifimizda mavjud.`,
-      {
-        chat_id: chatId,
-        message_id: query.message.message_id,
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '10 ⭐ 1 kunlik', callback_data: 'buy_premium_1day' },
-              { text: '25 ⭐ 3 kunlik', callback_data: 'buy_premium_3day' }
-            ],
-            [
-              { text: '75 ⭐ 1 haftalik', callback_data: 'buy_premium_1week' },
-              { text: '100 ⭐ 1 oylik', callback_data: 'buy_premium_1month' }
-            ],
-            [
-              { text: '250 ⭐ 3 oylik', callback_data: 'buy_premium_3month' },
-              { text: '1000 ⭐ cheksiz', callback_data: 'buy_premium_unlimited' }
-            ],
-            [
-              { text: '🚫 Bekor qilish', callback_data: 'cancel_premium' }
-            ]
-          ]
-        }
-      }
-    );
+    const user = await User.findOne({ telegramId: userId });
 
-    await bot.answerCallbackQuery(query.id);
-
-  } catch (error) {
-    console.error('Stars callback xatosi:', error);
-  }
-}
-
-// Premium sotib olish
-async function handleBuyPremium(bot, query, duration, User) {
-  const chatId = query.message.chat.id;
-  const userId = query.from.id;
-
-  try {
-    let user = await User.findOne({ telegramId: userId });
-    
     if (!user) {
       await bot.answerCallbackQuery(query.id, {
         text: '❌ Foydalanuvchi topilmadi!',
@@ -124,92 +99,113 @@ async function handleBuyPremium(bot, query, duration, User) {
       return;
     }
 
-    // Premium muddat hisoblash
-    let premiumDays = 0;
-    let premiumType = '';
-    let packageName = '';
+    // Premium narxlari
+    const premiumPrices = {
+      daily: { stars: 5, days: 1, name: 'Daily' },
+      weekly: { stars: 25, days: 7, name: 'Weekly' },
+      monthly: { stars: 80, days: 30, name: 'Monthly' },
+      unlimited: { stars: 200, days: 365, name: 'Unlimited' }
+    };
 
-    switch(duration) {
-      case '1day':
-        premiumDays = 1;
-        premiumType = 'daily';
-        packageName = '1 kunlik';
-        break;
-      case '3day':
-        premiumDays = 3;
-        premiumType = 'daily';
-        packageName = '3 kunlik';
-        break;
-      case '1week':
-        premiumDays = 7;
-        premiumType = 'weekly';
-        packageName = '1 haftalik';
-        break;
-      case '1month':
-        premiumDays = 30;
-        premiumType = 'monthly';
-        packageName = '1 oylik';
-        break;
-      case '3month':
-        premiumDays = 90;
-        premiumType = 'monthly';
-        packageName = '3 oylik';
-        break;
-      case 'unlimited':
-        premiumDays = 36500; // 100 yil
-        premiumType = 'unlimited';
-        packageName = 'cheksiz';
-        break;
+    const plan = premiumPrices[duration];
+
+    if (!plan) {
+      await bot.answerCallbackQuery(query.id, {
+        text: '❌ Noto\'g\'ri tarif!',
+        show_alert: true
+      });
+      return;
     }
 
-    // Premium berish
-    const premiumUntil = new Date();
-    premiumUntil.setDate(premiumUntil.getDate() + premiumDays);
+    // Telegram Stars orqali to'lash (invoice jo'natish)
+    const invoicePayload = JSON.stringify({
+      type: 'premium',
+      duration: duration,
+      userId: userId,
+      timestamp: Date.now()
+    });
 
-    user.isPremium = true;
-    user.premiumUntil = premiumUntil;
-    user.premiumType = premiumType;
-    await user.save();
+    try {
+      await bot.sendInvoice(
+        chatId,
+        `Premium - ${plan.name}`,
+        `${plan.days} kunlik PREMIUM obuna`,
+        invoicePayload,
+        'XC', // currency code (UZ uchun testda)
+        [
+          {
+            label: `${plan.name} Premium`,
+            amount: plan.stars * 100 // cents
+          }
+        ],
+        {
+          provider_token: process.env.PAYMENT_PROVIDER_TOKEN || ''
+        }
+      );
 
-    // Tabrik xabari
-    await bot.editMessageText(
-      `🎉 *Tabriklaymiz!* 🎉\n\n` +
-      `Sizga *${packageName}* Premium taqdim etildi!\n\n` +
-      `💎 Premium imkoniyatlar:\n` +
-      `✅ Cheksiz xabar yuborish\n` +
-      `✅ Reklama yo'q\n` +
-      `✅ Maxfiylik darajasi yuqori\n` +
-      `✅ 24/7 yordam\n\n` +
-      `📅 Amal qilish muddati: ${premiumUntil.toLocaleDateString('uz-UZ')}\n\n` +
-      `Xizmatlarimizdan foydalanganingiz uchun rahmat! 🌟`,
-      {
-        chat_id: chatId,
-        message_id: query.message.message_id,
-        parse_mode: 'Markdown'
-      }
-    );
+      await bot.answerCallbackQuery(query.id);
 
-    await bot.answerCallbackQuery(query.id);
+    } catch (paymentError) {
+      // Agar payment provider'da muammo bo'lsa
+      console.log('Payment provider error, using Stars alternative');
 
-    console.log(`💎 Premium berildi: User ${userId} - ${packageName}`);
+      await bot.sendMessage(chatId,
+        `⭐ TELEGRAM STARS BILAN TO'LASH\n\n` +
+        `Tarif: ${plan.name}\n` +
+        `Narx: ${plan.stars} ⭐\n\n` +
+        `${plan.days} kunlik PREMIUM obuna uchun ${plan.stars} ta ⭐ yuboringiz.\n\n` +
+        `⚠️ To'lovni tasdiqlash uchun support'ga murojaat qiling.`,
+        {
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '📞 Support', url: 'https://t.me/support' }
+            ]]
+          }
+        }
+      );
+
+      await bot.answerCallbackQuery(query.id);
+    }
 
   } catch (error) {
-    console.error('Premium berish xatosi:', error);
+    console.error('Buy premium error:', error);
     await bot.answerCallbackQuery(query.id, {
-      text: '❌ Xatolik yuz berdi!',
+      text: '❌ To\'lovda xatolik!',
       show_alert: true
     });
   }
-}
+};
 
-// Bekor qilish
-async function handleCancelPremium(bot, query) {
+/**
+ * Telegram Stars orqali to'lash tasdiqlanganida
+ */
+const handlePremiumStars = async (bot, query) => {
   const chatId = query.message.chat.id;
-  
+  const userId = query.from.id;
+
+  try {
+    // Stars payment integration (agar mavjud bo'lsa)
+    await bot.answerCallbackQuery(query.id);
+
+    await bot.sendMessage(chatId,
+      `⭐ To'lov vaqitinchalik notsiya\n\n` +
+      `Support'ga murojaat qiling: /help`
+    );
+
+  } catch (error) {
+    console.error('Premium stars error:', error);
+  }
+};
+
+/**
+ * Premium bekor qilish
+ */
+const handleCancelPremium = async (bot, query) => {
+  const chatId = query.message.chat.id;
+
   try {
     await bot.editMessageText(
-      `❌ Bekor qilindi.\n\n` +
-      `Agar keyinroq Premium xizmatidan foydalanmoqchi bo'lsangiz, /premium buyrug'ini yuboring.`,
+      `Bekor qilindi ❌`,
       {
         chat_id: chatId,
         message_id: query.message.message_id
@@ -217,10 +213,11 @@ async function handleCancelPremium(bot, query) {
     );
 
     await bot.answerCallbackQuery(query.id);
+
   } catch (error) {
-    console.error('Cancel xatosi:', error);
+    console.error('Cancel premium error:', error);
   }
-}
+};
 
 module.exports = {
   handlePremium,

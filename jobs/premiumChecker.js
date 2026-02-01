@@ -1,47 +1,97 @@
 // bot/jobs/premiumChecker.js
 const User = require('../models/User');
+const TelegramBot = require('node-telegram-bot-api');
 
-async function checkPremiumExpiry(bot) {
-  try {
-    const users = await User.find({
-      isPremium: true,
-      premiumUntil: { $lte: new Date() }
-    });
+/**
+ * Premium muddati tugganmi tekshirish
+ * Har 1 soatda ishga tushadi
+ */
+const startPremiumChecker = (bot) => {
+  // Har soatda ishga tushirish
+  const premiumCheckInterval = 60 * 60 * 1000; // 1 soat
 
-    for (const user of users) {
-      // Premium tugadi
-      user.isPremium = false;
-      user.premiumType = null;
-      await user.save();
+  setInterval(async () => {
+    try {
+      console.log('🔄 Premium expiry check started...');
+      
+      const now = new Date();
+      
+      // Muddati tuggan premium user'larni topish
+      const expiredUsers = await User.find({
+        isPremium: true,
+        premiumUntil: { $lt: now }
+      });
 
-      // Foydalanuvchiga xabar
-      try {
-        await bot.sendMessage(user.telegramId,
-          `⏰ Sizning Premium obunangiz tugadi!\n\n` +
-          `Premium xizmatlardan yana foydalanish uchun /premium buyrug'ini yuboring.`
-        );
-      } catch (error) {
-        console.log(`User ${user.telegramId} ga xabar yuborib bo'lmadi`);
+      if (expiredUsers.length === 0) {
+        console.log('✅ Muddati tuggan premium yo\'q');
+        return;
       }
-    }
 
-    if (users.length > 0) {
-      console.log(`🔔 ${users.length} ta Premium tugadi`);
+      // Har bir expired user uchun
+      for (const user of expiredUsers) {
+        try {
+          // User ma'lumotlarini yangilash
+          user.isPremium = false;
+          user.premiumType = null;
+          user.premiumUntil = null;
+          await user.save();
+
+          // User'ga xabar yuborish
+          await bot.sendMessage(
+            user.telegramId,
+            `⏰ Sizning PREMIUM obunasi tugab qoldi\n\n` +
+            `🔗 Davom ettirish uchun /premium buyrug'idan foydalaning`
+          ).catch(err => {
+            console.error(`Failed to notify user ${user.telegramId}:`, err.message);
+          });
+
+          console.log(`❌ Premium expired for user: ${user.telegramId}`);
+
+        } catch (error) {
+          console.error(`Error processing user ${user._id}:`, error);
+        }
+      }
+
+      console.log(`✅ Premium check completed. ${expiredUsers.length} users processed`);
+
+    } catch (error) {
+      console.error('❌ Premium checker error:', error);
     }
+  }, premiumCheckInterval);
+
+  console.log('🚀 Premium checker started (interval: 1 hour)');
+};
+
+/**
+ * On-demand premium expiry check
+ * API orqali chaqirilishi mumkin
+ */
+const checkPremiumExpiry = async () => {
+  try {
+    const now = new Date();
+    
+    const result = await User.updateMany(
+      {
+        isPremium: true,
+        premiumUntil: { $lt: now }
+      },
+      {
+        isPremium: false,
+        premiumType: null,
+        premiumUntil: null
+      }
+    );
+
+    console.log(`🔄 Premium expiry check: ${result.modifiedCount} users updated`);
+    return result.modifiedCount;
 
   } catch (error) {
-    console.error('Premium checker xatosi:', error);
+    console.error('❌ Premium expiry check error:', error);
+    return 0;
   }
-}
+};
 
-// Har 1 soatda tekshirish
-function startPremiumChecker(bot) {
-  setInterval(() => {
-    checkPremiumExpiry(bot);
-  }, 60 * 60 * 1000); // 1 soat
-
-  // Dastlab bir marta ishga tushirish
-  checkPremiumExpiry(bot);
-}
-
-module.exports = { startPremiumChecker };
+module.exports = {
+  startPremiumChecker,
+  checkPremiumExpiry
+};

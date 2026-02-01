@@ -1,7 +1,14 @@
+// bot/bot-webhook.js
 const express = require('express');
 const bodyParser = require('body-parser');
 const TelegramBot = require('node-telegram-bot-api');
-const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+
+// ✅ SHARED MODULES
+const connectDB = require('../shared/config/database');
+const User = require('../shared/models/User');
+const Message = require('../shared/models/Message');
+
 const { startPremiumChecker } = require('./jobs/premiumChecker');
 const {
   handlePremium,
@@ -14,7 +21,8 @@ const {
   getMediaType,
   canSendMedia
 } = require('./handlers/mediaHandler');
-require('dotenv').config();
+
+dotenv.config();
 
 const TOKEN = process.env.BOT_TOKEN;
 const BOT_USERNAME = process.env.BOT_USERNAME;
@@ -25,77 +33,17 @@ app.use(bodyParser.json());
 
 const bot = new TelegramBot(TOKEN);
 
-// User Schema
-const userSchema = new mongoose.Schema({
-  telegramId: { type: Number, required: true, unique: true, index: true },
-  username: { type: String, default: null },
-  firstName: { type: String, default: null },
-  lastName: { type: String, default: null },
-  isBlocked: { type: Boolean, default: false },
-  messageCount: { type: Number, default: 0 },
-  isPremium: { type: Boolean, default: false },
-  premiumUntil: { type: Date, default: null },
-  premiumType: { type: String, enum: ['daily', 'weekly', 'monthly', 'unlimited', null], default: null },
-  createdAt: { type: Date, default: Date.now }
-});
-
-userSchema.methods.checkPremiumExpiry = function() {
-  if (this.isPremium && this.premiumUntil) {
-    if (new Date() > this.premiumUntil) {
-      this.isPremium = false;
-      this.premiumType = null;
-      return true;
-    }
-  }
-  return false;
-};
-
-// Message Schema - Media support bilan
-const messageSchema = new mongoose.Schema({
-  recipientId: { type: Number, required: true, index: true },
-  senderId: { type: Number, default: null },
-  content: { type: String, required: true },
-  messageType: { type: String, enum: ['text', 'media'], default: 'text' },
-  
-  // Media uchun qo'shimcha maydonlar
-  mediaType: {
-    type: String,
-    enum: ['photo', 'audio', 'animation', 'document', null],
-    default: null
-  },
-  fileId: {
-    type: String,
-    default: null,
-    index: true
-  },
-  fileName: {
-    type: String,
-    default: null
-  },
-  fileSize: {
-    type: Number,
-    default: 0
-  },
-  
-  // Moderatsiya
-  isFlagged: { type: Boolean, default: false },
-  isDeleted: { type: Boolean, default: false, index: true },
-  hasReplied: { type: Boolean, default: false },
-  
-  timestamp: { type: Date, default: Date.now, index: true }
-});
-
-const User = mongoose.models.User || mongoose.model('User', userSchema);
-const Message = mongoose.models.Message || mongoose.model('Message', messageSchema);
-
-// MongoDB connection
+// ✅ SHARED DATABASE CONNECTION
 if (mongoose.connection.readyState === 0) {
-  mongoose.connect(process.env.MONGODB_URI)
+  connectDB()
     .then(() => {
-      console.log('✅ MongoDB ulandi');
+      console.log('✅ Shared MongoDB connected to Bot');
       startPremiumChecker(bot);
     })
-    .catch(err => console.error('❌ MongoDB xatosi:', err));
+    .catch(err => {
+      console.error('❌ Database connection error:', err);
+      process.exit(1);
+    });
 }
 
 const userStates = new Map();
@@ -106,20 +54,23 @@ bot.setWebHook(`${WEBHOOK_URL}${webhookPath}`)
   .then(() => console.log('✅ Webhook sozlandi'))
   .catch(err => console.error('❌ Webhook xatosi:', err));
 
+// Health check
 app.get('/', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'Bot ishlayapti ✅',
     mode: 'webhook',
+    database: 'Shared MongoDB',
     timestamp: new Date().toISOString()
   });
 });
 
+// Webhook endpoint
 app.post(webhookPath, (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
 
-// /start command
+// ==================== /start COMMAND ====================
 bot.onText(/\/start(.*)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
@@ -143,15 +94,16 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
     if (!param) {
       const personalLink = `https://t.me/${BOT_USERNAME}?start=${userId}`;
       
-      await bot.sendMessage(chatId, 
+      await bot.sendMessage(chatId,
         `👋 Salom!\n\n` +
         `🔗 Sizning anonim xabar qabul qilish linkinggiz:\n\n` +
         `${personalLink}\n\n` +
-        `Bu linkni do'stlaringiz bilan baham ko'ring. ` +
+        `Bu linkni do'stlaringiz bilan baham ko'ring.\n` +
         `Ular sizga anonim xabar yuborishlari mumkin! 🎭\n\n` +
-        `📌 *Xususiyatlar:*\n` +
+        `📌 Xususiyatlar:\n` +
         `• 📝 Matn xabar (hammaga)\n` +
-        `• 🖼️ Rasm, 🎵 Audio, 🎬 GIF (faqat PREMIUM)`
+        `• 🖼️ Rasm, 🎵 Audio, 🎬 GIF (faqat PREMIUM)\n\n` +
+        `Premium uchun: /premium`
       );
       return;
     }
@@ -181,15 +133,15 @@ bot.onText(/\/start(.*)/, async (msg, match) => {
     );
 
   } catch (error) {
-    console.error('Xato:', error);
-    await bot.sendMessage(chatId, '❌ Xatolik yuz berdi. Iltimos qayta urinib ko\'ring.');
+    console.error('Start handler error:', error);
+    await bot.sendMessage(chatId, '❌ Xatolik yuz berdi. Qayta urinib ko\'ring.');
   }
 });
 
-// /premium command
+// ==================== /premium COMMAND ====================
 bot.onText(/\/premium/, (msg) => handlePremium(bot, msg, User));
 
-// /stats command
+// ==================== /stats COMMAND ====================
 bot.onText(/\/stats/, async (msg) => {
   const chatId = msg.chat.id;
   try {
@@ -204,16 +156,15 @@ bot.onText(/\/stats/, async (msg) => {
       `📨 Xabarlar: ${totalMessages}`
     );
   } catch (error) {
-    console.error('Xato:', error);
+    console.error('Stats error:', error);
   }
 });
 
-// ==================== UNIFIED MESSAGE HANDLER ====================
+// ==================== MESSAGE HANDLER ====================
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
 
-  // Komanda bo'lsa skip
   if (msg.text && msg.text.startsWith('/')) {
     return;
   }
@@ -230,7 +181,6 @@ bot.on('message', async (msg) => {
 
       // ========== MEDIA HANDLING ==========
       if (msg.photo || msg.audio || msg.animation || msg.document) {
-        // Media yuborish
         await handleMediaSend(bot, msg, User, Message, recipientId);
         userStates.delete(userId);
         return;
@@ -250,8 +200,7 @@ bot.on('message', async (msg) => {
         await message.save();
 
         await bot.sendMessage(recipientId,
-          `🎭 Sizga anonim xabar keldi:\n\n` +
-          `"${messageText}"`,
+          `🎭 Sizga anonim xabar keldi:\n\n"${messageText}"`,
           {
             reply_markup: {
               inline_keyboard: [[
@@ -262,16 +211,14 @@ bot.on('message', async (msg) => {
         );
 
         await bot.sendMessage(chatId,
-          `✅ Xabaringiz muvaffaqiyatli yuborildi!\n\n` +
-          `🔒 Sizning shaxsingiz anonim qoldi.`
+          `✅ Xabaringiz muvaffaqiyatli yuborildi!\n\n🔒 Sizning shaxsingiz anonim qoldi.`
         );
 
         userStates.delete(userId);
-        console.log(`📨 Matn xabar yuborildi: ${userId} → ${recipientId}`);
+        console.log(`📨 Message sent: ${userId} → ${recipientId}`);
       }
     }
     else if (userState.action === 'replying') {
-      // ========== REPLY TEXT ==========
       if (msg.text) {
         const messageText = msg.text;
         
@@ -283,51 +230,41 @@ bot.on('message', async (msg) => {
         }
 
         await bot.sendMessage(userState.originalSenderId,
-          `💬 Sizning anonim xabaringizga javob:\n\n` +
-          `"${messageText}"`
+          `💬 Sizning anonim xabaringizga javob:\n\n"${messageText}"`
         );
 
         await bot.sendMessage(chatId,
-          `✅ Javobingiz yuborildi!\n\n` +
-          `🔒 Sizning shaxsingiz anonim qoldi.`
+          `✅ Javobingiz yuborildi!\n\n🔒 Sizning shaxsingiz anonim qoldi.`
         );
 
         userStates.delete(userId);
-        console.log(`💬 Javob yuborildi: ${userId} → ${userState.originalSenderId}`);
+        console.log(`💬 Reply sent: ${userId} → ${userState.originalSenderId}`);
       }
     }
 
   } catch (error) {
-    console.error('Xato:', error);
+    console.error('Message handler error:', error);
     await bot.sendMessage(chatId, '❌ Xabar yuborishda xatolik yuz berdi.');
   }
 });
 
-// ==================== UNIFIED CALLBACK HANDLER ====================
+// ==================== CALLBACK HANDLER ====================
 bot.on('callback_query', async (query) => {
   const data = query.data;
   const chatId = query.message.chat.id;
   const userId = query.from.id;
 
-  console.log('🔔 Callback query:', data);
-
   try {
-    // Premium callbacks
     if (data === 'premium_stars') {
-      console.log('⭐ Premium Stars bosildi');
       await handlePremiumStars(bot, query);
     }
     else if (data.startsWith('buy_premium_')) {
       const duration = data.replace('buy_premium_', '');
-      console.log('💎 Premium sotib olish:', duration);
       await handleBuyPremium(bot, query, duration, User);
     }
     else if (data === 'cancel_premium') {
-      console.log('❌ Premium bekor qilindi');
       await handleCancelPremium(bot, query);
     }
-    
-    // Reply callbacks
     else if (data.startsWith('reply_')) {
       const messageId = data.replace('reply_', '');
       
@@ -343,7 +280,7 @@ bot.on('callback_query', async (query) => {
 
       if (message.hasReplied) {
         await bot.answerCallbackQuery(query.id, {
-          text: '❌ Siz bu xabarga allaqachon javob bergansiz!',
+          text: '❌ Siz bu xabarga javob bergansiz!',
           show_alert: true
         });
         return;
@@ -366,8 +303,7 @@ bot.on('callback_query', async (query) => {
       await bot.answerCallbackQuery(query.id);
       
       await bot.sendMessage(chatId,
-        `✍️ Javobingizni yozing:\n\n` +
-        `💡 Javobingiz anonim yuboriladi.`
+        `✍️ Javobingizni yozing:\n\n💡 Javobingiz anonim yuboriladi.`
       );
 
       await bot.editMessageReplyMarkup(
@@ -378,13 +314,9 @@ bot.on('callback_query', async (query) => {
         }
       );
     }
-    else {
-      console.log('⚠️ Noma\'lum callback:', data);
-      await bot.answerCallbackQuery(query.id);
-    }
 
   } catch (error) {
-    console.error('Callback xatosi:', error);
+    console.error('Callback error:', error);
     await bot.answerCallbackQuery(query.id, {
       text: '❌ Xatolik yuz berdi!',
       show_alert: true
@@ -392,12 +324,10 @@ bot.on('callback_query', async (query) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
-if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => {
-    console.log(`🚀 Webhook bot ${PORT} portda ishlamoqda`);
-  });
-}
+const PORT = process.env.BOT_PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Bot webhook running on port ${PORT}`);
+  console.log(`📊 Database: Shared MongoDB`);
+});
 
-// Bot instance'ni export qilish
 module.exports = { app, bot };
