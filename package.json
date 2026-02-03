@@ -8,6 +8,7 @@
     "dev": "node bot.js"
   },
   "dependencies": {
+    "@revencoder/anonymous-shared": "github:RevenBro/anonymous-shared",
     "body-parser": "^1.20.4",
     "dotenv": "^16.3.1",
     "express": "^4.22.1",

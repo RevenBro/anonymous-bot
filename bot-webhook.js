@@ -5,9 +5,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const dotenv = require('dotenv');
 
 // ✅ SHARED MODULES
-const connectDB = require('../shared/config/database');
-const User = require('../shared/models/User');
-const Message = require('../shared/models/Message');
+const { connectDB, User, Message } = require('@revencoder/anonymous-shared');
 
 const { startPremiumChecker } = require('./jobs/premiumChecker');
 const {
@@ -23,6 +21,7 @@ const {
 } = require('./handlers/mediaHandler');
 
 dotenv.config();
+require('dotenv').config();
 
 const TOKEN = process.env.BOT_TOKEN;
 const BOT_USERNAME = process.env.BOT_USERNAME;
