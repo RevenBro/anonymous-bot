@@ -1,5 +1,5 @@
 // bot/jobs/premiumChecker.js
-const User = require('../models/User');
+const { User } = require('@revencoder/anonymous-shared');
 const TelegramBot = require('node-telegram-bot-api');
 
 /**
