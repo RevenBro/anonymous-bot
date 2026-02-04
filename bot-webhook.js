@@ -3,6 +3,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const TelegramBot = require('node-telegram-bot-api');
 const dotenv = require('dotenv');
+const mongoose = require("mongoose");
 
 // ✅ SHARED MODULES
 const { connectDB, User, Message } = require('@revencoder/anonymous-shared');
